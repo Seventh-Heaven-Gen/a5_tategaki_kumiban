@@ -2,7 +2,11 @@
   "name": "a5-tategaki-kumiban",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "description": "A5 vertical typesetting tool with server-side PDF output",
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@sparticuz/chromium": "^153.0.0",
     "puppeteer-core": "^25.12.0"

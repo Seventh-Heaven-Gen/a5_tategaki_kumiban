@@ -1,6 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const puppeteer = require('puppeteer-core');
+import fs from 'node:fs';
+import path from 'node:path';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 const MAX_CHARS = 400000;
 const SELECTS = {
@@ -13,7 +14,6 @@ async function launch() {
   if (process.env.CHROME_PATH) {
     return puppeteer.launch({ executablePath: process.env.CHROME_PATH, headless: true });
   }
-  const chromium = (await import('@sparticuz/chromium')).default;
   return puppeteer.launch({
     args: chromium.args,
     executablePath: await chromium.executablePath(),
@@ -21,7 +21,7 @@ async function launch() {
   });
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.statusCode = 405;
     res.setHeader('Allow', 'POST');
@@ -75,4 +75,4 @@ module.exports = async (req, res) => {
   } finally {
     if (browser) await browser.close();
   }
-};
+}
