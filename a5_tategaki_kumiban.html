@@ -23,7 +23,8 @@ button{font:inherit;padding:10px;border:0;border-radius:8px;background:var(--ac)
 #pv{display:grid;grid-template-columns:repeat(2,148mm);column-gap:0;row-gap:14px;width:max-content;align-items:start}
 .page{position:relative;width:148mm;height:210mm;background:#fff;color:#000;box-shadow:0 1px 6px rgba(0,0,0,.35);overflow:hidden}
 .clip{position:absolute;overflow:hidden}
-.flow{position:absolute;top:0;writing-mode:vertical-rl;text-align:justify;line-break:strict;overflow-wrap:break-word;text-combine-upright:digits 2;font-kerning:normal}
+.flow{position:absolute;top:0;writing-mode:vertical-rl;text-align:justify;line-break:strict;overflow-wrap:break-word;font-kerning:normal}
+.tcy{text-combine-upright:all}
 .flow p{margin:0;white-space:pre-wrap}
 .flow p.ind{text-indent:1em}
 .hf{position:absolute;font-size:8pt;line-height:1;text-align:center;white-space:nowrap}
@@ -67,6 +68,7 @@ button{font:inherit;padding:10px;border:0;border-radius:8px;background:var(--ac)
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const tcy=s=>s.replace(/(?<![0-9])[0-9]{1,2}(?![0-9])/g,'<span class="tcy">$&</span>'); // Chromeはdigits未対応のためspanで縦中横
 let timer,busy=false,again=false;
 const PX=96/25.4, PT=25.4/72;
 async function render(){
@@ -83,9 +85,9 @@ async function render(){
   const ai=$('ai').checked;
   const html=text.split(/\r\n|\r|\n/).map(l=>{
    if(!l.trim())return '<p><br></p>';
-   if(!ai)return `<p>${esc(l)}</p>`; // 入力のまま(自動の字下げ・空白追加なし)
+   if(!ai)return `<p>${tcy(esc(l))}</p>`; // 入力のまま(自動の字下げ・空白追加なし)
    const t=l.replace(/^[\s\u3000]+/,'');
-   return `<p${/^[「『（(〈《【〔\[]/.test(t)?'':' class="ind"'}>${esc(t)}</p>`;
+   return `<p${/^[「『（(〈《【〔\[]/.test(t)?'':' class="ind"'}>${tcy(esc(t))}</p>`;
   }).join('');
   const fs=`font-family:'${font}',serif;font-size:${sz}pt;line-height:${pitch}mm;height:${h}mm;`;
   // measure
