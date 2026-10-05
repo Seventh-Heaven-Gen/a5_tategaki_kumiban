@@ -103,7 +103,7 @@ async function render(){
    let s='';
    for(let r=0;r<rows;r++){
     const k=p*rows+r;
-    s+=`<div class="clip" style="left:${ml}mm;top:${15+r*(h+GAP)}mm;width:${CW}mm;height:${h}mm"><div class="flow" style="${fs}right:${-k*CW}mm">${html}</div></div>`;
+    s+=`<div class="clip" style="left:${ml}mm;top:${15+r*(h+GAP)}mm;width:${CW}mm;height:${h}mm"><div class="flow" style="${fs}width:${lines*pitch}mm;right:${-k*CW}mm">${html}</div></div>`;
    }
    const hp=$('hp').value,al=hp==='center'?'center':((hp==='outer')===left?'left':'right');
    s+=`<div class="hf" style="left:${ml}mm;width:${CW}mm;top:7mm;text-align:${al}">${hd}</div>`;
@@ -121,7 +121,7 @@ async function render(){
 }
 function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
 ['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
-$('pdf').onclick=()=>window.print();
+$('pdf').onclick=()=>{const t=document.title;document.title=$('hd').value||'A5_tategaki';window.print();setTimeout(()=>document.title=t,1000)};
 render();
 </script>
 </body></html>
