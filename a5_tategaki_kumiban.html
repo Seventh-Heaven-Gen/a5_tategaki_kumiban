@@ -122,82 +122,56 @@ async function render(){
 }
 function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
 ['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
-const ROTV=new Set('ー〜～—–―…‥─＝「」『』（）【】〈〉《》〔〕〖〗｛｝［］＜＞〝〟');
-const PCTV=new Set('。、，．');
-function isHV(c){const v=c.charCodeAt(0);return v<=0x024F||(v>=0xFF61&&v<=0xFF9F)}
+let _fontCss=null;
+async function embedFonts(){
+ if(_fontCss)return _fontCss;
+ const link=document.querySelector('link[href*="fonts.googleapis"]');
+ if(!link)return '';
+ const css=await fetch(link.href).then(r=>r.text());
+ const urls=[...new Set([...css.matchAll(/url\(([^)]+)\)/g)].map(m=>m[1]))];
+ const reps=await Promise.all(urls.map(async u=>{
+  try{const b=await(await fetch(u)).blob();
+   return{u,d:await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})};
+  }catch(e){return{u,d:u}}
+ }));
+ let r=css;for(const{u,d}of reps)r=r.replaceAll(u,d);
+ _fontCss=r;return r;
+}
 async function generatePdf(){
- const st=$('st');st.textContent='PDF生成中…';
+ const st=$('st');st.textContent='フォントを埋め込み中…';
  try{
-  const sz=+$('size').value,font=$('font').value,rows=+$('cols').value;
-  const ls=$('ls').checked,both=$('bind').value==='both',ai=$('ai').checked;
-  const hdT=$('hd').value,ftT=$('ft').value,showPn=$('pn').checked,hpV=$('hp').value;
-  const text=$('text').value;
-  if(!text.trim()){st.textContent='本文を入力してください';return}
-  if(typeof window.jspdf==='undefined'){st.textContent='PDFライブラリの読み込みに失敗しました。ページを再読み込みしてください。';return}
-  await Promise.race([Promise.all([document.fonts.load(`${sz}pt "${font}"`,text+'0123456789'),document.fonts.load(`bold ${sz}pt "${font}"`,'a')]),new Promise(r=>setTimeout(r,5000))]);
-  const CW=113,CH=180,GAP=8,h=rows===2?(CH-GAP)/2:CH;
-  const N=Math.max(1,Math.floor(CW/(sz*PT*1.75))),pitch=CW/N;
-  // measure char height
-  const md=document.createElement('div');
-  md.style.cssText=`position:absolute;left:-99999px;visibility:hidden;writing-mode:vertical-rl;white-space:nowrap;font-family:'${font}',serif;font-size:${sz}pt;font-kerning:normal`;
-  md.textContent='国'.repeat(50);document.body.appendChild(md);
-  const cpPx=md.getBoundingClientRect().height/50;md.remove();
-  const cpMm=cpPx/PX,CPC=Math.floor(h/cpMm);
-  // tokenize: handle text-combine-upright digits 2
-  const tok=s=>{const t=[],ch=Array.from(s);let i=0;while(i<ch.length){if(/[0-9]/.test(ch[i])){let r='',j=i;while(j<ch.length&&/[0-9]/.test(ch[j])){r+=ch[j];j++}if(r.length<=2)t.push({c:r,tcy:r.length===2});else for(const d of r)t.push({c:d,tcy:false});i=j}else{t.push({c:ch[i],tcy:false});i++}}return t};
-  // parse paragraphs
-  const paras=text.split(/\r\n|\r|\n/).map(l=>{
-   if(!l.trim())return{tk:[],empty:true,ind:false};
-   if(!ai)return{tk:tok(l),empty:false,ind:false};
-   const t=l.replace(/^[\s　]+/,'');
-   return{tk:tok(t),empty:false,ind:!/^[「『（(〈《【〔\[]/.test(t)};
-  });
-  // layout chars into cells
-  const cells=[];let col=0,row=0;
-  for(let pi=0;pi<paras.length;pi++){
-   const pa=paras[pi];
-   if(pi>0){if(row>0)col++;row=0}
-   if(pa.empty){col++;continue}
-   if(pa.ind)row=1;
-   for(const t of pa.tk){if(row>=CPC){col++;row=0}cells.push({col,row,c:t.c,tcy:t.tcy});row++}
-  }
-  const totalCols=row>0?col+1:Math.max(1,col);
-  const pages=Math.max(1,Math.ceil(totalCols/(N*rows)));
-  // render to canvas + jsPDF
-  const S=3,pwP=Math.round(148*PX*S),phP=Math.round(210*PX*S);
-  const cv=document.createElement('canvas');cv.width=pwP;cv.height=phP;
-  const cx=cv.getContext('2d');
+  if(typeof window.jspdf==='undefined'){st.textContent='PDFライブラリの読み込みに失敗しました';return}
+  const pages=[...document.querySelectorAll('#pv .page')];
+  if(!pages.length){st.textContent='プレビューがありません';return}
+  const fontCss=await embedFonts();
+  st.textContent='PDF生成中…';
+  const pageCss=document.querySelector('style').textContent;
+  const allCss=fontCss+'\n'+pageCss+'\n.page{box-shadow:none!important;margin:0!important}';
+  const W=148*PX,H=210*PX,S=3;
+  const cw=Math.ceil(W*S),ch=Math.ceil(H*S);
+  const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+  const ctx=cv.getContext('2d');
+  const ser=new XMLSerializer();
   const{jsPDF}=window.jspdf;
   const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:[148,210]});
-  const fsPx=Math.round(sz*PT*PX*S);
-  for(let p=0;p<pages;p++){
-   if(p>0)pdf.addPage([148,210]);
-   const n=p+1,left=ls?(n%2===1):(n%2===0),ml=both?20:(left?15:20);
-   cx.fillStyle='#fff';cx.fillRect(0,0,pwP,phP);cx.fillStyle='#000';
-   cx.font=`${fsPx}px '${font}',serif`;cx.textAlign='center';cx.textBaseline='middle';
-   for(let r=0;r<rows;r++){
-    const k=p*rows+r,c0=k*N,c1=c0+N,top=15+r*(h+GAP);
-    for(const c of cells){
-     if(c.col<c0||c.col>=c1)continue;
-     const lc=c.col-c0,x=(ml+CW-lc*pitch-pitch/2)*PX*S,y=(top+c.row*cpMm+cpMm/2)*PX*S;
-     if(c.tcy){const ts=Math.round(fsPx*0.5);cx.font=`${ts}px '${font}',serif`;cx.fillText(c.c,x,y);cx.font=`${fsPx}px '${font}',serif`}
-     else if(ROTV.has(c.c)){cx.save();cx.translate(x,y);cx.rotate(Math.PI/2);cx.fillText(c.c,0,0);cx.restore()}
-     else if(PCTV.has(c.c)){cx.fillText(c.c,x+fsPx*0.28,y-fsPx*0.32)}
-     else if(isHV(c.c)){cx.save();cx.translate(x,y);cx.rotate(Math.PI/2);cx.fillText(c.c,0,0);cx.restore()}
-     else{cx.fillText(c.c,x,y)}
-    }
-   }
-   // header / footer / page number
-   const hfPx=Math.round(8*PT*PX*S);cx.font=`${hfPx}px '${font}',serif`;
-   if(hdT){const al=hpV==='center'?'center':((hpV==='outer')===left?'left':'right');cx.textAlign=al;const hx=al==='left'?ml*PX*S:al==='right'?(ml+CW)*PX*S:(ml+CW/2)*PX*S;cx.textBaseline='top';cx.fillText(hdT,hx,7*PX*S);cx.textBaseline='middle'}
-   if(ftT){cx.textAlign='center';cx.textBaseline='bottom';cx.fillText(ftT,(ml+CW/2)*PX*S,(210-7)*PX*S)}
-   if(showPn){cx.textBaseline='bottom';if(both){cx.textAlign='center';cx.fillText(String(n),(ml+CW/2)*PX*S,(210-7)*PX*S)}else if(left){cx.textAlign='left';cx.fillText(String(n),15*PX*S,(210-7)*PX*S)}else{cx.textAlign='right';cx.fillText(String(n),(148-15)*PX*S,(210-7)*PX*S)}}
+  const pre=`<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}" viewBox="0 0 ${W} ${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${W}px;height:${H}px;overflow:hidden"><style><![CDATA[${allCss}]]></style>`;
+  const suf='</div></foreignObject></svg>';
+  for(let i=0;i<pages.length;i++){
+   if(i>0)pdf.addPage([148,210]);
+   st.textContent=`${i+1}/${pages.length}ページ描画中…`;
+   const clone=pages[i].cloneNode(true);
+   clone.style.boxShadow='none';
+   const xhtml=ser.serializeToString(clone);
+   const svg=pre+xhtml+suf;
+   const img=new Image();
+   await new Promise((ok,ng)=>{img.onload=ok;img.onerror=ng;img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)});
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);
+   ctx.drawImage(img,0,0,cw,ch);
    pdf.addImage(cv.toDataURL('image/jpeg',0.95),'JPEG',0,0,148,210);
-   st.textContent=`${p+1}/${pages}ページ生成中…`;
-   if(p%3===2)await new Promise(r=>setTimeout(r,0));
+   if(i%3===2)await new Promise(r=>setTimeout(r,0));
   }
-  pdf.save((hdT||'A5_tategaki')+'.pdf');
-  st.textContent=`${pages}ページのPDFを保存しました`;
+  pdf.save(($('hd').value||'A5_tategaki')+'.pdf');
+  st.textContent=`${pages.length}ページのPDFを保存しました`;
  }catch(e){console.error(e);st.textContent='エラー: '+e.message}
 }
 $('pdf').onclick=generatePdf;
