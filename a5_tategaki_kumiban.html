@@ -59,7 +59,7 @@ button{font:inherit;padding:10px;border:0;border-radius:8px;background:var(--ac)
  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="pn" checked>ページ番号を表示</label>
  <button id="pdf">PDFで書き出す</button>
  <div id="st" class="note"></div>
- <div class="note">印刷画面で送信先を「PDFに保存」、余白「なし」、「背景のグラフィック」オンにしてください。A5・縦書き。左始まりは右綴じ(見開きで1 / 3 2 / 5 4…)、右始まりは左綴じ(見開きで 1 / 2 3 / 4 5…)。天地・小口15mm、綴じしろ20mm。</div>
+ <div class="note">印刷画面で送信先を「PDFに保存」、余白「なし」、「ヘッダーとフッター」オフ、「背景のグラフィック」オンにしてください。A5・縦書き。左始まりは右綴じ(見開きで1 / 3 2 / 5 4…)、右始まりは左綴じ(見開きで 1 / 2 3 / 4 5…)。天地・小口15mm、綴じしろ20mm。</div>
 </div>
 <div id="pvw"><div id="pv"></div></div>
 </div>
@@ -121,7 +121,7 @@ async function render(){
 }
 function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
 ['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
-$('pdf').onclick=()=>{const t=document.title;document.title=$('hd').value||'A5_tategaki';window.print();setTimeout(()=>document.title=t,1000)};
+$('pdf').onclick=()=>{const t=document.title;document.title=$('hd').value||'A5_tategaki';requestAnimationFrame(()=>{window.print();document.title=t})};
 render();
 </script>
 </body></html>
