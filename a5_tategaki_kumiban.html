@@ -3,7 +3,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>A5 縦書き組版ツール</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{box-sizing:border-box;--bg:#f2f1ee;--pn:#fff;--tx:#222;--bd:#ccc;--ac:#2a5bd7;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1c1e;--pn:#2a2a2d;--tx:#eee;--bd:#444;--ac:#7aa2ff}}
@@ -59,6 +58,7 @@ button{font:inherit;padding:10px;border:0;border-radius:8px;background:var(--ac)
  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="ai">段落頭を自動で1字下げ(行頭の空白は除去。「『（始まりは下げない)</label>
  <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="pn" checked>ページ番号を表示</label>
  <button id="pdf">PDFで書き出す</button>
+ <button id="prt" style="background:transparent;color:var(--ac);border:1px solid var(--ac);font-weight:400">ブラウザの印刷で書き出す(予備)</button>
  <div id="st" class="note"></div>
  <div class="note">A5・縦書き。左始まりは右綴じ(見開きで1 / 3 2 / 5 4…)、右始まりは左綴じ(見開きで 1 / 2 3 / 4 5…)。天地・小口15mm、綴じしろ20mm。</div>
 </div>
@@ -122,93 +122,25 @@ async function render(){
 }
 function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
 ['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
-const ROTV=new Set('ー〜～—–―…‥─＝「」『』（）【】〈〉《》〔〕〖〗｛｝［］＜＞〝〟');
-const PCTV=new Set('。、，．');
-function isHV(c){const v=c.charCodeAt(0);return v<=0x024F||(v>=0xFF61&&v<=0xFF9F)}
 async function generatePdf(){
- const st=$('st');st.textContent='PDF生成中…';
+ const st=$('st'),btn=$('pdf'),text=$('text').value;
+ if(!text.trim()){st.textContent='本文を入力してください';return}
+ btn.disabled=true;st.textContent='PDF生成中…(数秒〜数十秒かかります)';
  try{
-  if(typeof window.jspdf==='undefined'){st.textContent='PDFライブラリの読み込みに失敗しました';return}
-  const sz=+$('size').value,font=$('font').value,rows=+$('cols').value;
-  const ls=$('ls').checked,both=$('bind').value==='both',ai=$('ai').checked;
-  const text=$('text').value;
-  if(!text.trim()){st.textContent='本文を入力してください';return}
-  await Promise.race([Promise.all([document.fonts.load(`${sz}pt "${font}"`,text+'0123456789'),document.fonts.load(`bold ${sz}pt "${font}"`,'a')]),new Promise(r=>setTimeout(r,5000))]);
-  const CW=113,CH=180,GAP=8,h=rows===2?(CH-GAP)/2:CH;
-  const N=Math.max(1,Math.floor(CW/(sz*PT*1.75))),pitch=CW/N;
-  const html=text.split(/\r\n|\r|\n/).map(l=>{
-   if(!l.trim())return '<p><br></p>';
-   if(!ai)return `<p>${esc(l)}</p>`;
-   const t=l.replace(/^[\s　]+/,'');
-   return `<p${/^[「『（(〈《【〔\[]/.test(t)?'':' class="ind"'}>${esc(t)}</p>`;
-  }).join('');
-  const fs=`font-family:'${font}',serif;font-size:${sz}pt;line-height:${pitch}mm;height:${h}mm;`;
-  // hidden flow: measure lines, then constrain and read char positions via Range API
-  const m=document.createElement('div');m.className='flow';
-  m.style.cssText=fs+'position:absolute;left:-99999px;visibility:hidden';
-  m.innerHTML=html;document.body.appendChild(m);
-  const lines=Math.max(1,Math.round(m.getBoundingClientRect().width/(pitch*PX)));
-  m.style.width=`${lines*pitch}mm`;void m.offsetWidth;
-  const fR=m.getBoundingClientRect(),fW=fR.width,ppx=pitch*PX;
-  st.textContent='文字位置を計測中…';
-  const chars=[];
-  (function walk(nd){
-   if(nd.nodeType===3){
-    const t=nd.textContent;
-    for(let i=0;i<t.length;i++){
-     if(t[i]==='\n')continue;
-     const rng=document.createRange();rng.setStart(nd,i);rng.setEnd(nd,i+1);
-     const rc=rng.getBoundingClientRect();
-     if(rc.width===0&&rc.height===0)continue;
-     const cx=(rc.left+rc.right)/2-fR.left,cy=(rc.top+rc.bottom)/2-fR.top;
-     chars.push({ch:t[i],cx,cy,col:Math.floor((fW-cx)/ppx),w:rc.width});
-    }
-   }else if(nd.nodeType===1){for(const c of nd.childNodes)walk(c)}
-  })(m);
-  m.remove();
-  const pages=Math.max(1,Math.ceil(lines/(N*rows)));
-  // render to canvas + jsPDF
-  const S=3,cw=Math.ceil(148*PX*S),ch2=Math.ceil(210*PX*S);
-  const cv=document.createElement('canvas');cv.width=cw;cv.height=ch2;
-  const ctx=cv.getContext('2d');
-  const{jsPDF}=window.jspdf;
-  const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:[148,210]});
-  const fsPx=Math.round(sz*PT*PX*S);
-  for(let p=0;p<pages;p++){
-   if(p>0)pdf.addPage([148,210]);
-   st.textContent=`${p+1}/${pages}ページ描画中…`;
-   const n=p+1,left=ls?(n%2===1):(n%2===0),ml=both?20:(left?15:20);
-   ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch2);ctx.fillStyle='#000';
-   ctx.font=`${fsPx}px '${font}',serif`;ctx.textAlign='center';ctx.textBaseline='middle';
-   for(let r=0;r<rows;r++){
-    const k=p*rows+r,c0=k*N,c1=c0+N;
-    const topPx=(15+r*(h+GAP))*PX;
-    const secRight=fW-c0*ppx;
-    for(const c of chars){
-     if(c.col<c0||c.col>=c1)continue;
-     const x=((ml+CW)*PX-(secRight-c.cx))*S;
-     const y=(topPx+c.cy)*S;
-     if(ROTV.has(c.ch)){ctx.save();ctx.translate(x,y);ctx.rotate(Math.PI/2);ctx.fillText(c.ch,0,0);ctx.restore()}
-     else if(PCTV.has(c.ch)){ctx.fillText(c.ch,x+fsPx*0.28,y-fsPx*0.32)}
-     else if(isHV(c.ch)){ctx.save();ctx.translate(x,y);ctx.rotate(Math.PI/2);ctx.fillText(c.ch,0,0);ctx.restore()}
-     else if(c.w<ppx*0.6&&/[0-9]/.test(c.ch)){
-      const ts=Math.round(fsPx*0.55);ctx.font=`${ts}px '${font}',serif`;ctx.fillText(c.ch,x,y);ctx.font=`${fsPx}px '${font}',serif`}
-     else{ctx.fillText(c.ch,x,y)}
-    }
-   }
-   const hfPx=Math.round(8*PT*PX*S);ctx.font=`${hfPx}px '${font}',serif`;
-   const hdT=$('hd').value,ftT=$('ft').value;
-   if(hdT){const hpV=$('hp').value;const al=hpV==='center'?'center':((hpV==='outer')===left?'left':'right');ctx.textAlign=al;const hx=al==='left'?ml*PX*S:al==='right'?(ml+CW)*PX*S:(ml+CW/2)*PX*S;ctx.textBaseline='top';ctx.fillText(hdT,hx,7*PX*S)}
-   if(ftT){ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(ftT,(ml+CW/2)*PX*S,(210-7)*PX*S)}
-   if($('pn').checked){ctx.textBaseline='bottom';ctx.textAlign='center';if(both){ctx.fillText(String(n),(ml+CW/2)*PX*S,(210-7)*PX*S)}else if(left){ctx.textAlign='left';ctx.fillText(String(n),15*PX*S,(210-7)*PX*S)}else{ctx.textAlign='right';ctx.fillText(String(n),(148-15)*PX*S,(210-7)*PX*S)}}
-   pdf.addImage(cv.toDataURL('image/jpeg',0.95),'JPEG',0,0,148,210);
-   if(p%3===2)await new Promise(r=>setTimeout(r,0));
-  }
-  pdf.save(($('hd').value||'A5_tategaki')+'.pdf');
-  st.textContent=`${pages}ページのPDFを保存しました`;
+  const body={text,cols:$('cols').value,size:$('size').value,font:$('font').value,bind:$('bind').value,hd:$('hd').value,hp:$('hp').value,ft:$('ft').value,ai:$('ai').checked,pn:$('pn').checked,ls:$('ls').checked};
+  const r=await fetch('/api/pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error(r.status===413?'原稿が長すぎます。2回に分けてください':'PDF生成に失敗しました。原稿が長い場合は2回に分けてください(HTTP '+r.status+')');
+  const blob=await r.blob();
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=($('hd').value.trim().replace(/[\/:*?"<>|]/g,'_')||'A5_tategaki')+'.pdf';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+  st.textContent='PDFを保存しました';
  }catch(e){console.error(e);st.textContent='エラー: '+e.message}
+ btn.disabled=false;
 }
 $('pdf').onclick=generatePdf;
+$('prt').onclick=()=>window.print();
 render();
 </script>
 </body></html>
