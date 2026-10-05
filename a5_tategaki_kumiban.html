@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A5 縦書き組版ツール</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&display=swap">
+<style>
+:root{box-sizing:border-box;--bg:#f2f1ee;--pn:#fff;--tx:#222;--bd:#ccc;--ac:#2a5bd7;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1c1e;--pn:#2a2a2d;--tx:#eee;--bd:#444;--ac:#7aa2ff}}
+:root[data-theme="dark"]{--bg:#1c1c1e;--pn:#2a2a2d;--tx:#eee;--bd:#444;--ac:#7aa2ff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 "Noto Sans JP",sans-serif}
+.app{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px}
+@media(max-width:800px){.app{grid-template-columns:1fr}}
+.panel{background:var(--pn);border:1px solid var(--bd);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;align-self:start}
+label{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+input,select,textarea{font:inherit;padding:6px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx)}
+textarea{min-height:220px;resize:vertical}
+button{font:inherit;padding:10px;border:0;border-radius:8px;background:var(--ac);color:#fff;font-weight:700;cursor:pointer}
+.note{font-size:11px;opacity:.7}
+#pvw{overflow-x:auto;min-width:0}
+#pv{display:grid;grid-template-columns:repeat(2,148mm);column-gap:0;row-gap:14px;width:max-content;align-items:start}
+.page{position:relative;width:148mm;height:210mm;background:#fff;color:#000;box-shadow:0 1px 6px rgba(0,0,0,.35);overflow:hidden}
+.clip{position:absolute;overflow:hidden}
+.flow{position:absolute;top:0;writing-mode:vertical-rl;text-align:justify;line-break:strict;overflow-wrap:break-word;text-combine-upright:digits 2;font-kerning:normal}
+.flow p{margin:0;white-space:pre-wrap}
+.flow p.ind{text-indent:1em}
+.hf{position:absolute;font-size:8pt;line-height:1;text-align:center;white-space:nowrap}
+@page{size:148mm 210mm;margin:0}
+@media print{
+ html,body{background:#fff;margin:0}
+ .app{display:block;padding:0}.panel{display:none}
+ #pv{display:block;width:auto}
+ .page{box-shadow:none;break-after:page;page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .page:last-child{break-after:auto;page-break-after:auto}
+}
+</style></head>
+<body>
+<div class="app">
+<div class="panel">
+ <label>本文<textarea id="text">吾輩は猫である。名前はまだ無い。
+どこで生れたかとんと見当がつかぬ。何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+
+ここに本文を入力してください。改行で段落になり、空行を入れると一行空きます。2026年のような数字も縦中横になります。</textarea></label>
+ <div class="row">
+  <label>段組み<select id="cols"><option value="1">1段</option><option value="2">2段</option></select></label>
+  <label>文字サイズ<select id="size"><option>8</option><option>9</option><option>9.5</option><option selected>10</option><option>10.5</option><option>11</option><option>12</option><option>14</option></select></label>
+ </div>
+ <div class="row">
+  <label>書体<select id="font"><option value="Noto Serif JP">明朝</option><option value="Noto Sans JP">ゴシック</option></select></label>
+  <label>綴じしろ(20mm)<select id="bind"><option value="gutter">ノド</option><option value="both">両端</option></select></label>
+ </div>
+ <div class="row"><label>ヘッダー<input id="hd"></label>
+  <label style="flex:0 0 110px">ヘッダー位置<select id="hp"><option value="outer">ページ外側</option><option value="center">ページ中央</option><option value="inner">ページ内側</option></select></label></div>
+ <label>フッター<input id="ft"></label>
+ <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="ls" checked>左始まり(1ページ目が左。オフで右始まり)</label>
+ <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="ai">段落頭を自動で1字下げ(行頭の空白は除去。「『（始まりは下げない)</label>
+ <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="pn" checked>ページ番号を表示</label>
+ <button id="pdf">PDFで書き出す</button>
+ <div id="st" class="note"></div>
+ <div class="note">印刷画面で送信先を「PDFに保存」、余白「なし」、「背景のグラフィック」オンにしてください。A5・縦書き。左始まりは右綴じ(見開きで1 / 3 2 / 5 4…)、右始まりは左綴じ(見開きで 1 / 2 3 / 4 5…)。天地・小口15mm、綴じしろ20mm。</div>
+</div>
+<div id="pvw"><div id="pv"></div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+let timer,busy=false,again=false;
+const PX=96/25.4, PT=25.4/72;
+async function render(){
+ if(busy){again=true;return}
+ busy=true;
+ try{
+  const ls=$('ls').checked,sz=+$('size').value,font=$('font').value,rows=+$('cols').value,both=$('bind').value==='both';
+  const text=$('text').value;
+  const CW=113,CH=180,GAP=8,h=rows===2?(CH-GAP)/2:CH;
+  const N=Math.max(1,Math.floor(CW/(sz*PT*1.75))),pitch=CW/N;
+  await Promise.race([
+   Promise.all([document.fonts.load(`${sz}pt "${font}"`,text+'0123456789'),document.fonts.load(`bold ${sz}pt "${font}"`,'a')]),
+   new Promise(r=>setTimeout(r,5000))]);
+  const ai=$('ai').checked;
+  const html=text.split(/\r\n|\r|\n/).map(l=>{
+   if(!l.trim())return '<p><br></p>';
+   if(!ai)return `<p>${esc(l)}</p>`; // 入力のまま(自動の字下げ・空白追加なし)
+   const t=l.replace(/^[\s\u3000]+/,'');
+   return `<p${/^[「『（(〈《【〔\[]/.test(t)?'':' class="ind"'}>${esc(t)}</p>`;
+  }).join('');
+  const fs=`font-family:'${font}',serif;font-size:${sz}pt;line-height:${pitch}mm;height:${h}mm;`;
+  // measure
+  const m=document.createElement('div');m.className='flow';m.style.cssText=fs+'left:-99999px;visibility:hidden';
+  m.innerHTML=html;document.body.appendChild(m);
+  const lines=Math.max(1,Math.round(m.getBoundingClientRect().width/(pitch*PX)));
+  m.remove();
+  const pages=Math.max(1,Math.ceil(lines/(N*rows)));
+  const pv=$('pv');pv.innerHTML='';
+  const hd=esc($('hd').value),ft=esc($('ft').value);
+  for(let p=0;p<pages;p++){
+   const n=p+1,left=ls?(n%2===1):(n%2===0); // 左ページ:ノドは右側 / 右ページ:ノドは左側
+   const ml=both?20:(left?15:20);
+   const pg=document.createElement('div');pg.className='page';
+   pg.style.gridRow=Math.floor(n/2)+1;pg.style.gridColumn=left?1:2;
+   let s='';
+   for(let r=0;r<rows;r++){
+    const k=p*rows+r;
+    s+=`<div class="clip" style="left:${ml}mm;top:${15+r*(h+GAP)}mm;width:${CW}mm;height:${h}mm"><div class="flow" style="${fs}right:${-k*CW}mm">${html}</div></div>`;
+   }
+   const hp=$('hp').value,al=hp==='center'?'center':((hp==='outer')===left?'left':'right');
+   s+=`<div class="hf" style="left:${ml}mm;width:${CW}mm;top:7mm;text-align:${al}">${hd}</div>`;
+   s+=`<div class="hf" style="left:${ml}mm;width:${CW}mm;bottom:7mm">${ft}</div>`;
+   if($('pn').checked){
+    const pos=both?`left:${ml}mm;width:${CW}mm`:(left?'left:15mm':'right:15mm');
+    s+=`<div class="hf" style="bottom:7mm;${pos}">${n}</div>`;
+   }
+   pg.innerHTML=s;pv.appendChild(pg);
+  }
+  $('st').textContent=`${pages}ページ(${lines}行)`;
+ }catch(e){console.error(e);$('st').textContent='エラー: '+e.message}
+ busy=false;
+ if(again){again=false;render()}
+}
+function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
+['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
+$('pdf').onclick=()=>window.print();
+render();
+</script>
+</body></html>
