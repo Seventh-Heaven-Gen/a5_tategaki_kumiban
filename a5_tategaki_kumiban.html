@@ -122,56 +122,90 @@ async function render(){
 }
 function sched(){clearTimeout(timer);timer=setTimeout(render,400)}
 ['text','cols','size','font','bind','hd','hp','ai','ft','pn','ls'].forEach(i=>$(i).addEventListener('input',sched));
-let _fontCss=null;
-async function embedFonts(){
- if(_fontCss)return _fontCss;
- const link=document.querySelector('link[href*="fonts.googleapis"]');
- if(!link)return '';
- const css=await fetch(link.href).then(r=>r.text());
- const urls=[...new Set([...css.matchAll(/url\(([^)]+)\)/g)].map(m=>m[1]))];
- const reps=await Promise.all(urls.map(async u=>{
-  try{const b=await(await fetch(u)).blob();
-   return{u,d:await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})};
-  }catch(e){return{u,d:u}}
- }));
- let r=css;for(const{u,d}of reps)r=r.replaceAll(u,d);
- _fontCss=r;return r;
-}
+const ROTV=new Set('ー〜～—–―…‥─＝「」『』（）【】〈〉《》〔〕〖〗｛｝［］＜＞〝〟');
+const PCTV=new Set('。、，．');
+function isHV(c){const v=c.charCodeAt(0);return v<=0x024F||(v>=0xFF61&&v<=0xFF9F)}
 async function generatePdf(){
- const st=$('st');st.textContent='フォントを埋め込み中…';
+ const st=$('st');st.textContent='PDF生成中…';
  try{
   if(typeof window.jspdf==='undefined'){st.textContent='PDFライブラリの読み込みに失敗しました';return}
-  const pages=[...document.querySelectorAll('#pv .page')];
-  if(!pages.length){st.textContent='プレビューがありません';return}
-  const fontCss=await embedFonts();
-  st.textContent='PDF生成中…';
-  const pageCss=document.querySelector('style').textContent;
-  const allCss=fontCss+'\n'+pageCss+'\n.page{box-shadow:none!important;margin:0!important}';
-  const W=148*PX,H=210*PX,S=3;
-  const cw=Math.ceil(W*S),ch=Math.ceil(H*S);
-  const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+  const sz=+$('size').value,font=$('font').value,rows=+$('cols').value;
+  const ls=$('ls').checked,both=$('bind').value==='both',ai=$('ai').checked;
+  const text=$('text').value;
+  if(!text.trim()){st.textContent='本文を入力してください';return}
+  await Promise.race([Promise.all([document.fonts.load(`${sz}pt "${font}"`,text+'0123456789'),document.fonts.load(`bold ${sz}pt "${font}"`,'a')]),new Promise(r=>setTimeout(r,5000))]);
+  const CW=113,CH=180,GAP=8,h=rows===2?(CH-GAP)/2:CH;
+  const N=Math.max(1,Math.floor(CW/(sz*PT*1.75))),pitch=CW/N;
+  const html=text.split(/\r\n|\r|\n/).map(l=>{
+   if(!l.trim())return '<p><br></p>';
+   if(!ai)return `<p>${esc(l)}</p>`;
+   const t=l.replace(/^[\s　]+/,'');
+   return `<p${/^[「『（(〈《【〔\[]/.test(t)?'':' class="ind"'}>${esc(t)}</p>`;
+  }).join('');
+  const fs=`font-family:'${font}',serif;font-size:${sz}pt;line-height:${pitch}mm;height:${h}mm;`;
+  // hidden flow: measure lines, then constrain and read char positions via Range API
+  const m=document.createElement('div');m.className='flow';
+  m.style.cssText=fs+'position:absolute;left:-99999px;visibility:hidden';
+  m.innerHTML=html;document.body.appendChild(m);
+  const lines=Math.max(1,Math.round(m.getBoundingClientRect().width/(pitch*PX)));
+  m.style.width=`${lines*pitch}mm`;void m.offsetWidth;
+  const fR=m.getBoundingClientRect(),fW=fR.width,ppx=pitch*PX;
+  st.textContent='文字位置を計測中…';
+  const chars=[];
+  (function walk(nd){
+   if(nd.nodeType===3){
+    const t=nd.textContent;
+    for(let i=0;i<t.length;i++){
+     if(t[i]==='\n')continue;
+     const rng=document.createRange();rng.setStart(nd,i);rng.setEnd(nd,i+1);
+     const rc=rng.getBoundingClientRect();
+     if(rc.width===0&&rc.height===0)continue;
+     const cx=(rc.left+rc.right)/2-fR.left,cy=(rc.top+rc.bottom)/2-fR.top;
+     chars.push({ch:t[i],cx,cy,col:Math.floor((fW-cx)/ppx),w:rc.width});
+    }
+   }else if(nd.nodeType===1){for(const c of nd.childNodes)walk(c)}
+  })(m);
+  m.remove();
+  const pages=Math.max(1,Math.ceil(lines/(N*rows)));
+  // render to canvas + jsPDF
+  const S=3,cw=Math.ceil(148*PX*S),ch2=Math.ceil(210*PX*S);
+  const cv=document.createElement('canvas');cv.width=cw;cv.height=ch2;
   const ctx=cv.getContext('2d');
-  const ser=new XMLSerializer();
   const{jsPDF}=window.jspdf;
   const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:[148,210]});
-  const pre=`<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}" viewBox="0 0 ${W} ${H}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${W}px;height:${H}px;overflow:hidden"><style><![CDATA[${allCss}]]></style>`;
-  const suf='</div></foreignObject></svg>';
-  for(let i=0;i<pages.length;i++){
-   if(i>0)pdf.addPage([148,210]);
-   st.textContent=`${i+1}/${pages.length}ページ描画中…`;
-   const clone=pages[i].cloneNode(true);
-   clone.style.boxShadow='none';
-   const xhtml=ser.serializeToString(clone);
-   const svg=pre+xhtml+suf;
-   const img=new Image();
-   await new Promise((ok,ng)=>{img.onload=ok;img.onerror=ng;img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)});
-   ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch);
-   ctx.drawImage(img,0,0,cw,ch);
+  const fsPx=Math.round(sz*PT*PX*S);
+  for(let p=0;p<pages;p++){
+   if(p>0)pdf.addPage([148,210]);
+   st.textContent=`${p+1}/${pages}ページ描画中…`;
+   const n=p+1,left=ls?(n%2===1):(n%2===0),ml=both?20:(left?15:20);
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,cw,ch2);ctx.fillStyle='#000';
+   ctx.font=`${fsPx}px '${font}',serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+   for(let r=0;r<rows;r++){
+    const k=p*rows+r,c0=k*N,c1=c0+N;
+    const topPx=(15+r*(h+GAP))*PX;
+    const secRight=fW-c0*ppx;
+    for(const c of chars){
+     if(c.col<c0||c.col>=c1)continue;
+     const x=((ml+CW)*PX-(secRight-c.cx))*S;
+     const y=(topPx+c.cy)*S;
+     if(ROTV.has(c.ch)){ctx.save();ctx.translate(x,y);ctx.rotate(Math.PI/2);ctx.fillText(c.ch,0,0);ctx.restore()}
+     else if(PCTV.has(c.ch)){ctx.fillText(c.ch,x+fsPx*0.28,y-fsPx*0.32)}
+     else if(isHV(c.ch)){ctx.save();ctx.translate(x,y);ctx.rotate(Math.PI/2);ctx.fillText(c.ch,0,0);ctx.restore()}
+     else if(c.w<ppx*0.6&&/[0-9]/.test(c.ch)){
+      const ts=Math.round(fsPx*0.55);ctx.font=`${ts}px '${font}',serif`;ctx.fillText(c.ch,x,y);ctx.font=`${fsPx}px '${font}',serif`}
+     else{ctx.fillText(c.ch,x,y)}
+    }
+   }
+   const hfPx=Math.round(8*PT*PX*S);ctx.font=`${hfPx}px '${font}',serif`;
+   const hdT=$('hd').value,ftT=$('ft').value;
+   if(hdT){const hpV=$('hp').value;const al=hpV==='center'?'center':((hpV==='outer')===left?'left':'right');ctx.textAlign=al;const hx=al==='left'?ml*PX*S:al==='right'?(ml+CW)*PX*S:(ml+CW/2)*PX*S;ctx.textBaseline='top';ctx.fillText(hdT,hx,7*PX*S)}
+   if(ftT){ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(ftT,(ml+CW/2)*PX*S,(210-7)*PX*S)}
+   if($('pn').checked){ctx.textBaseline='bottom';ctx.textAlign='center';if(both){ctx.fillText(String(n),(ml+CW/2)*PX*S,(210-7)*PX*S)}else if(left){ctx.textAlign='left';ctx.fillText(String(n),15*PX*S,(210-7)*PX*S)}else{ctx.textAlign='right';ctx.fillText(String(n),(148-15)*PX*S,(210-7)*PX*S)}}
    pdf.addImage(cv.toDataURL('image/jpeg',0.95),'JPEG',0,0,148,210);
-   if(i%3===2)await new Promise(r=>setTimeout(r,0));
+   if(p%3===2)await new Promise(r=>setTimeout(r,0));
   }
   pdf.save(($('hd').value||'A5_tategaki')+'.pdf');
-  st.textContent=`${pages.length}ページのPDFを保存しました`;
+  st.textContent=`${pages}ページのPDFを保存しました`;
  }catch(e){console.error(e);st.textContent='エラー: '+e.message}
 }
 $('pdf').onclick=generatePdf;
